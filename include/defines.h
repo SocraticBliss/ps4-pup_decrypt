@@ -1,17 +1,7 @@
-#ifndef __DEFINES
-#define __DEFINES
 
-#ifdef DEBUG_SOCKET
-  #define printfsocket(format, ...)\
-    do {\
-      char __printfsocket_buffer[512];\
-      int __printfsocket_size = sprintf(__printfsocket_buffer, format, ##__VA_ARGS__);\
-      sceNetSend(sock, __printfsocket_buffer, __printfsocket_size, 0);\
-    } while(0)
-#endif
+#define OUTPUTPATH "/mnt/usb0/%s.dec"
+#define INPUTPATH "/mnt/usb0/safe.PS4UPDATE.PUP"
 
-extern int sock;
-
-#define CHECK_SIZE(x, y) static_assert(sizeof(x) == y, #x)
-
-#endif
+#define DEBUG_SOCKET
+#define DEBUG_ADDR IP(192,168,1,100);
+#define DEBUG_PORT 9023

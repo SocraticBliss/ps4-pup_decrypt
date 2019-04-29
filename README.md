@@ -1,7 +1,9 @@
 # pup_decrypt
 A utility to invoke the PS4 kernel to decrypt the contents of an update file.
 
-The default (hardcoded) operation is to decrypt `/mnt/usb0/PS4UPDATE.PUP`.
+The default (hardcoded) operation is to decrypt `/mnt/usb0/safe.PS4UPDATE.PUP` to `/mnt/usb0/entryname.dec`.
+
+This will only decrypt >= current firmware version installed, latest tested (installed) firmware is 5.05.
 
 This will output a number of files (depending if a normal or a recovery update):
 * `/mnt/usb0/PS4UPDATE1.PUP.dec`
@@ -12,10 +14,9 @@ This will output a number of files (depending if a normal or a recovery update):
 These decrypted updates can then be unpacked using [pup_unpack](https://github.com/idc/ps4-pup_unpack/).
 
 ## Notes
-You will probably need [my fork of PS4-SDK that has my changes to libPS4](https://github.com/idc/PS4-SDK) to build.
+To build, you will need [a recent fork of ps4-payload-sdk](https://github.com/xvortex/ps4-payload-sdk).
 
 The PS4 will refuse to decrypt updates in some cases:
 * Versions older than the installed version (for the most part, there's exceptions for things like beta versions).
 * Versions for a different product code (retail cannot decrypt test or debug updates).
 
-[A list of updates decrypted on a 1.76 retail system](RETAIL.md).

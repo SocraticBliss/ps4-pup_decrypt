@@ -1,11 +1,9 @@
 #ifndef __PUP
 #define __PUP
 
-extern const uint8_t pup_signature[];
-
 typedef struct _pup_file_header
 {
-  uint8_t magic[4];
+  uint32_t magic;
   uint32_t unknown_04;
   uint16_t unknown_08;
   uint8_t flags;
@@ -28,7 +26,7 @@ pup_header;
 typedef struct _pup_segment
 {
   uint32_t flags;
-  off_t offset;
+  ssize_t offset;
   size_t compressed_size;
   size_t uncompressed_size;
 }

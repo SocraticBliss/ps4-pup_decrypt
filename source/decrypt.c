@@ -1,43 +1,26 @@
 #include "ps4.h"
-
-#include <assert.h>
-
-#define DEBUG_SOCKET
-#include "defines.h"
-
 #include "pup.h"
-#include "pupup.h"
+#include "bls.h"
+#include "decryptio.h"
+#include "encryptsrv.h"
+#include "defines.h"
+#include "debug.h"
 
-typedef struct _decrypt_state
-{
-  off_t input_base_offset;
-  FILE* input_file;
-  off_t output_base_offset;
-  FILE* output_file;
-  int device_fd;
-  int pup_type;
-}
-decrypt_state;
-
-int verify_segment(const decrypt_state state,
-                   int index, pup_segment* segment, int additional)
+int verify_segment(const decrypt_state* state, int index, pup_segment* segment, int additional)
 {
   int result;
   uint8_t* buffer = NULL;
 
   buffer = memalign(0x4000, segment->compressed_size);
-  fseek(state.input_file, state.input_base_offset + segment->offset, SEEK_SET);
-  int read = fread(buffer, segment->compressed_size, 1, state.input_file);
-  if (read != 1)
+  ssize_t bytesread = readbytes(state, segment->offset, segment->compressed_size, buffer, segment->compressed_size);
+  if (bytesread != segment->compressed_size)
   {
-    printfsocket("Failed to read segment #%d for verification! %d\n",
-                 index, read);
-    result = -1;
-    goto end;
+     printfsocket("Failed to read segment #%d for verification!\n", index);
+     result = -1;
+     goto end;
   }
 
-  result = pupup_verify_segment(state.device_fd, index, buffer,
-                                segment->compressed_size, additional);
+  result = encsrv_verify_segment(state->device_fd, index, buffer, segment->compressed_size, additional);
   if (result != 0)
   {
     printfsocket("Failed to verify segment #%d! %d\n", index, errno);
@@ -53,8 +36,7 @@ end:
   return result;
 }
 
-int verify_segments(const decrypt_state state,
-                    pup_segment* segments, int segment_count)
+int verify_segments(const decrypt_state* state, pup_segment* segments, int segment_count)
 {
   int result = 0;
 
@@ -63,8 +45,7 @@ int verify_segments(const decrypt_state state,
     pup_segment* segment = &segments[i];
     if ((segment->flags & 0xF0000000) == 0xE0000000)
     {
-      printfsocket("Verifying segment #%d (%d)... [1]\n",
-                   i, segment->flags >> 20);
+      printfsocket("Verifying segment #%d (%d)... [1]\n", i, segment->flags >> 20);
       result = verify_segment(state, i, segment, 1);
       if (result < 0)
       {
@@ -78,8 +59,7 @@ int verify_segments(const decrypt_state state,
     pup_segment* segment = &segments[i];
     if ((segment->flags & 0xF0000000) == 0xF0000000)
     {
-      printfsocket("Verifying segment #%d (%d)... [0]\n",
-                   i, segment->flags >> 20);
+      printfsocket("Verifying segment #%d (%d)... [0]\n", i, segment->flags >> 20);
       result = verify_segment(state, i, segment, 0);
       if (result < 0)
       {
@@ -92,17 +72,11 @@ end:
   return result;
 }
 
-int decrypt_segment(const decrypt_state state,
-                    uint16_t index, pup_segment* segment)
+int decrypt_segment(const decrypt_state* state, uint16_t index, pup_segment* segment)
 {
   int result = -1;
-  uint8_t* buffer = NULL;
 
-  buffer = memalign(0x4000, segment->compressed_size);
-  fseek(state.input_file,
-        state.input_base_offset + segment->offset, SEEK_SET);
-  fseek(state.output_file,
-        state.output_base_offset + segment->offset, SEEK_SET);
+  uint8_t* buffer = buffer = memalign(0x4000, segment->compressed_size);
 
   int is_compressed = (segment->flags & 8) != 0 ? 1 : 0;
 
@@ -122,19 +96,19 @@ int decrypt_segment(const decrypt_state state,
       encrypted_size = segment->compressed_size;
     }
 
-    int read = fread(buffer, encrypted_size, 1, state.input_file);
-    if (read != 1)
+    ssize_t bytesread = readbytes(state, segment->offset, encrypted_size, buffer, segment->compressed_size);
+    if (bytesread != encrypted_size)
     {
-      printfsocket("Failed to read segment #%d! #%d\n", index, read);
+      printfsocket("Failed to read segment #%d!\n", index);
       result = -1;
       goto end;
     }
 
-    result = pupup_decrypt_segment(state.device_fd,
-                                   index, buffer, encrypted_size);
+    result = encsrv_decrypt_segment(state->device_fd, index, buffer, encrypted_size);
     if (result != 0)
     {
-      printfsocket("Failed to decrypt segment #%d! %d\n", index, errno);
+      int errcode = errno;
+      printfsocket("Failed to decrypt segment #%d! - Error: %d (%s)\n", index, errcode, strerror(errcode));
       goto end;
     }
 
@@ -144,7 +118,12 @@ int decrypt_segment(const decrypt_state state,
       unencrypted_size = encrypted_size;
     }
 
-    fwrite(buffer, unencrypted_size, 1, state.output_file);
+    ssize_t byteswritten = writebytes(state, segment->offset, unencrypted_size, buffer, segment->compressed_size);
+    if (byteswritten != unencrypted_size) {
+      printfsocket("Failed to write segment #%d!\n", index);
+      result = -1;
+      goto end;
+    }
   }
 
 end:
@@ -156,8 +135,7 @@ end:
   return result;
 }
 
-int decrypt_segment_blocks(const decrypt_state state,
-                           uint16_t index, pup_segment* segment,
+int decrypt_segment_blocks(const decrypt_state * state, uint16_t index, pup_segment* segment,
                            uint16_t table_index, pup_segment* table_segment)
 {
   int result = -1;
@@ -166,32 +144,29 @@ int decrypt_segment_blocks(const decrypt_state state,
 
   size_t table_length = table_segment->compressed_size;
   table_buffer = memalign(0x4000, table_length);
-  fseek(state.input_file,
-        state.input_base_offset + table_segment->offset, SEEK_SET);
 
-  int read = fread(table_buffer, table_length, 1, state.input_file);
-  if (read != 1)
+  ssize_t bytesread = readbytes(state, table_segment->offset, table_length, table_buffer, table_length);
+  if (bytesread != table_length)
   {
-    printfsocket("  Failed to read table for segment #%d! %d\n", index, read);
+    printfsocket("  Failed to read table for segment #%d!\n", index);
     result = -1;
     goto end;
   }
 
   printfsocket("  Decrypting table #%d for segment #%d\n", table_index, index);
-  result = pupup_decrypt_segment(state.device_fd,
+  result = encsrv_decrypt_segment(state->device_fd,
                                  table_index, table_buffer, table_length);
   if (result != 0)
   {
-    printfsocket("  Failed to decrypt table for segment #%d! %d\n",
-                 index, errno);
+    int errcode = errno;
+    printfsocket("  Failed to decrypt table for segment #%d! Error: %d (%s)\n", index, errcode, strerror(errcode));
     goto end;
   }
 
   int is_compressed = (segment->flags & 8) != 0 ? 1 : 0;
 
   size_t block_size = 1 << (((segment->flags & 0xF000) >> 12) + 12);
-  size_t block_count = (block_size + segment->uncompressed_size - 1)
-                       / block_size;
+  size_t block_count = (block_size + segment->uncompressed_size - 1) / block_size;
 
   size_t tail_size = segment->uncompressed_size % block_size;
   if (tail_size == 0)
@@ -199,7 +174,7 @@ int decrypt_segment_blocks(const decrypt_state state,
     tail_size = block_size;
   }
 
-  pup_block_info* block_infos = NULL;
+  pup_block_info* block_info = NULL;
   if (is_compressed == 1)
   {
     size_t valid_table_length = block_count * (32 + sizeof(pup_block_info));
@@ -208,37 +183,41 @@ int decrypt_segment_blocks(const decrypt_state state,
       printfsocket("  Strange segment #%d table: %llu vs %llu\n",
                    index, valid_table_length, table_length);
     }
-    block_infos = (pup_block_info*)&table_buffer[32 * block_count];
+    block_info = (pup_block_info*)&table_buffer[32 * block_count];
   }
 
   block_buffer = memalign(0x4000, block_size);
 
-  fseek(state.input_file,
-        state.input_base_offset + segment->offset, SEEK_SET);
-  fseek(state.output_file,
-        state.output_base_offset + segment->offset, SEEK_SET);
+  printfsocket("  Decrypting %d blocks...\n   ", block_count);
 
-  printfsocket("  Decrypting %d blocks...\n", block_count);
+  int Seeked = 0;
+  GetElapsed(0);
 
   size_t remaining_size = segment->compressed_size;
   int last_index = block_count - 1;
   for (int i = 0; i < block_count; i++)
   {
-    //printfsocket("  Decrypting block %d/%d...\n", i, block_count);
+    printfsocket("  Decrypting block %d/%d...\n", i, block_count);
+
+    if ((block_count > 50) && (i % 5 == 0) && (GetElapsed(15) == 1)) {
+       uint32_t percentage = (uint32_t)(((float)i / (float)block_count) * 100.0f);
+       sprintf(state->notifystr, "Approximately %d%% complete processing entry %s (%d/%d) from %s", percentage, state->entryname, state->entryid, state->totalentries, state->input_path);
+       notify(state->notifystr);
+    }
 
     size_t read_size;
+    ssize_t block_offset = 0;
 
     if (is_compressed == 1)
     {
-      pup_block_info* block_info = &block_infos[i];
-      uint32_t unpadded_size = (block_info->size & ~0xFu) -
-                               (block_info->size & 0xFu);
+      pup_block_info* tblock_info = &block_info[i];
+      uint32_t unpadded_size = (tblock_info->size & ~0xFu) - (tblock_info->size & 0xFu);
 
       read_size = block_size;
       if (unpadded_size != block_size)
       {
-        read_size = block_info->size;
-        if (i != last_index || tail_size != block_info->size)
+        read_size = tblock_info->size;
+        if (i != last_index || tail_size != tblock_info->size)
         {
           read_size &= ~0xFu;
         }
@@ -246,12 +225,9 @@ int decrypt_segment_blocks(const decrypt_state state,
 
       if (block_info->offset != 0)
       {
-        off_t block_offset = segment->offset + block_info->offset;
-        fseek(state.input_file,
-              state.input_base_offset + block_offset, SEEK_SET);
-        fseek(state.output_file,
-              state.output_base_offset + block_offset, SEEK_SET);
+          block_offset = tblock_info->offset;
       }
+
     }
     else
     {
@@ -262,26 +238,37 @@ int decrypt_segment_blocks(const decrypt_state state,
       }
     }
 
-    read = fread(block_buffer, read_size, 1, state.input_file);
-    if (read != 1)
+    size_t SeekTo = DIO_NOSEEK;
+    if (Seeked == 0) {
+        SeekTo = (block_offset != 0) ? (segment->offset + block_offset) : segment->offset;
+    } else {
+        SeekTo = (Seeked != 0) ? DIO_NOSEEK : segment->offset;
+    }
+
+    ssize_t bytesread = readbytes(state, SeekTo, read_size, block_buffer, block_size);
+    if (bytesread != read_size)
     {
-      printfsocket("  Failed to read block %d for segment #%d! %d\n",
-                   i, index, read);
+      printfsocket("  Failed to read block %d for segment #%d! %d\n", i, index, bytesread);
       goto end;
     }
 
-    result = pupup_decrypt_segment_block(state.device_fd,
-                                        index, i, block_buffer, read_size,
-                                        table_buffer, table_length);
+    result = encsrv_decrypt_segment_block(state->device_fd, index, i, block_buffer,
+					 read_size, table_buffer, table_length);
     if (result < 0)
     {
-      printfsocket("  Failed to decrypt block for segment #%d! %d\n",
-                   index, errno);
+      int errcode = errno;
+      printfsocket("  Failed to decrypt block for segment #%d! Error: %d (%s)\n", index, errcode, strerror(errcode));
       goto end;
     }
 
-    fwrite(block_buffer, read_size, 1, state.output_file);
+    ssize_t byteswritten = writebytes(state, SeekTo, read_size, block_buffer, block_size);
+    if (byteswritten != read_size)
+    {
+      printfsocket("  Failed to write block %d for segment #%d!\n", i, index);
+      goto end;
+    }
 
+    Seeked = 1;
     remaining_size -= read_size;
   }
 
@@ -325,19 +312,23 @@ int find_table_segment(int index, pup_segment* segments, int segment_count,
   return -2;
 }
 
-int decrypt_pup_data(const decrypt_state state)
+int decrypt_pup_data(const decrypt_state * state)
 {
   int result;
-  size_t read;
+  ssize_t bytesread;
   uint8_t* header_data = NULL;
 
-  fseek(state.input_file, state.input_base_offset, SEEK_SET);
-
   pup_file_header file_header;
-  read = fread(&file_header, sizeof(file_header), 1, state.input_file);
-  if (read != 1)
+  bytesread = readbytes(state, DIO_BASEOFFSET, sizeof(file_header), &file_header, sizeof(file_header));
+  if (bytesread != sizeof(file_header))
   {
-    printfsocket("Failed to read file header! (%u)\n", read);
+    printfsocket("Failed to read PUP entry header!\n");
+    goto end;
+  }
+
+
+  if (file_header.magic != 0x1D3D154F) {
+    printfsocket("PUP header magic is invalid!\n");
     goto end;
   }
 
@@ -346,23 +337,23 @@ int decrypt_pup_data(const decrypt_state state)
   header_data = memalign(0x4000, header_size);
   memcpy(header_data, &file_header, sizeof(file_header));
 
-  read = fread(&header_data[sizeof(file_header)],
-               header_size - sizeof(file_header), 1, state.input_file);
-  if (read != 1)
+  size_t tsize = header_size - sizeof(file_header);
+  bytesread = readbytes(state, DIO_NOSEEK, tsize, &header_data[sizeof(file_header)], header_size);
+  if (bytesread != tsize)
   {
-    printfsocket("Failed to read header! (%u)\n", read);
+    printfsocket("Failed to read PUP entry header!\n");
     goto end;
   }
 
   if ((file_header.flags & 1) == 0)
   {
     printfsocket("Decrypting header...\n");
-    result = pupup_decrypt_header(state.device_fd,
-                                  header_data, header_size,
-                                  0);//state.pup_type);
+    result = encsrv_decrypt_header(state->device_fd, header_data,
+				   header_size, state->pup_type);
     if (result != 0)
     {
-      printfsocket("Failed to decrypt header! %d\n", errno);
+      int errcode = errno;
+      printfsocket("Failed to decrypt header! Error: %d (%s)\n", errcode, strerror(errcode));
       goto end;
     }
   }
@@ -375,18 +366,22 @@ int decrypt_pup_data(const decrypt_state state)
   pup_header* header = (pup_header*)&header_data[0];
   pup_segment* segments = (pup_segment*)&header_data[0x20];
 
-  fseek(state.output_file, state.output_base_offset, SEEK_SET);
-  fwrite(header_data, header_size, 1, state.output_file);
+  ssize_t byteswritten = writebytes(state, DIO_BASEOFFSET, header_size, header_data, header_size);
+  if (byteswritten != header_size) {
+     printfsocket("Failed to write PUP entry header!\n");
+     goto end;
+  }
 
   printfsocket("Verifying segments...\n");
   result = verify_segments(state, segments, header->segment_count);
   if (result < 0)
   {
     printfsocket("Failed to verify segments!\n");
+    goto end;
   }
 
-  /*
-  for (int i = 0; i < header->segment_count; i++)
+
+  /*for (int i = 0; i < header->segment_count; i++)
   {
     pup_segment* segment = &segments[i];
     printfsocket("%4d i=%4u b=%u c=%u t=%u r=%05X\n",
@@ -395,8 +390,8 @@ int decrypt_pup_data(const decrypt_state state)
                   (segment->flags & 0x8) != 0,
                   (segment->flags & 0x1) != 0,
                    segment->flags & 0xFF7F6);
-  }
-  */
+  }*/
+
 
   printfsocket("Decrypting %d segments...\n", header->segment_count);
   for (int i = 0; i < header->segment_count; i++)
@@ -421,21 +416,25 @@ int decrypt_pup_data(const decrypt_state state)
     if ((segment->flags & 0x800) != 0)
     {
       int table_index;
-      result = find_table_segment(i, segments, header->segment_count,
-                                  &table_index);
+      result = find_table_segment(i, segments, header->segment_count, &table_index);
       if (result < 0)
       {
         printfsocket("Failed to find table for segment #%d!\n", i);
         continue;
       }
 
-      decrypt_segment_blocks(state, i, segment,
-                             table_index, &segments[table_index]);
+      result = decrypt_segment_blocks(state, i, segment, table_index, &segments[table_index]);
     }
     else
     {
-      decrypt_segment(state, i, segment);
+      result = decrypt_segment(state, i, segment);
     }
+
+    if (result < 0) {
+       goto end;
+    }
+
+
   }
 
 end:
@@ -447,142 +446,163 @@ end:
   return 0;
 }
 
-int get_pup_type(const char* name)
+void decrypt_pup(decrypt_state * state, const char * OutputPath)
 {
-  if (strcmp(name, "PS4UPDATE1.PUP") == 0 ||
-      strcmp(name, "PS4UPDATE2.PUP") == 0)
+
+  if (OutputPath != NULL) {
+      sprintf(state->output_path, OutputPath, state->entryname);
+  }
+  else
   {
-    return 1;
+      sprintf(state->output_path, OUTPUTPATH, state->entryname);
   }
 
-  if (strcmp(name, "PS4UPDATE3.PUP") == 0 ||
-      strcmp(name, "PS4UPDATE4.PUP") == 0)
+  printfsocket("Creating %s...\n", state->output_path);
+
+  state->output_file = open(state->output_path, O_WRONLY | O_CREAT | O_TRUNC, 0777);
+  if (state->output_file == -1)
   {
-    return 0;
-  }
-
-  return -1;
-}
-
-void decrypt_pup(const char* name, FILE* input, off_t baseOffset, int fd)
-{
-  FILE* output = NULL;
-
-  char path[260];
-  sprintf(path, "/mnt/usb0/%s.dec", name);
-
-  printfsocket("Creating %s...\n", path);
-
-  output = fopen(path, "wb");
-  if (output == NULL)
-  {
-    printfsocket("Failed to open %s!\n", path);
+    printfsocket("Failed to open %s!\n", state->output_path);
     goto end;
   }
 
-  int type = get_pup_type(name);
-  if (type < 0)
+
+  const char * name = state->entryname;
+
+  if (strcmp(name, "PS4UPDATE1.PUP") == 0 || strcmp(name, "PS4UPDATE2.PUP") == 0)
+    state->pup_type = 1;
+
+  if (strcmp(name, "PS4UPDATE3.PUP") == 0 || strcmp(name, "PS4UPDATE4.PUP") == 0)
+    state->pup_type = 0;
+
+  if (state->pup_type < 0)
   {
-    printfsocket("Don't know the type for %s!\n", path);
+    printfsocket("Don't know the type for %s!\n", state->output_path);
     goto end;
   }
 
-  decrypt_state state;
-  state.input_file = input;
-  state.input_base_offset = baseOffset;
-  state.output_file = output;
-  state.output_base_offset = 0;
-  state.device_fd = fd;
-  state.pup_type = type;
   decrypt_pup_data(state);
 
 end:
-  if (output != NULL)
+  if (state->output_file != -1)
   {
-    fclose(output);
+    close(state->output_file);
   }
+
 }
 
-typedef struct _bls_entry
+
+void decrypt_pups(const char * InputPath, const char * OutputPath)
 {
-  uint32_t block_offset;
-  uint32_t size;
-  uint8_t reserved[8];
-  char name[32];
-}
-bls_entry;
-CHECK_SIZE(bls_entry, 48);
 
-typedef struct _bls_header
-{
-  uint32_t magic;
-  uint32_t version;
-  uint32_t flags;
-  uint32_t file_count;
-  uint32_t block_count;
-  uint8_t reserved[12];
-}
-bls_header;
-CHECK_SIZE(bls_header, 32);
+  decrypt_state state = { 0 };
+  state.device_fd = -1;
 
-void decrypt_pups()
-{
-  const char* path = "/mnt/usb0/PS4UPDATE.PUP";
+  char * strings = (char*)malloc(2048);
+  state.input_path = strings; //512
+  state.output_path = strings+512; //512
+  state.entryname = strings+1024; //512
+  state.notifystr = strings+1536; //512
 
-  int read;
-  int fd = -1;
-  FILE* input = NULL;
-  bls_entry* entries = NULL;
+  uint8_t * header_data = NULL;
+  size_t blsinitial = 0x400;
 
-  fd = open("/dev/pup_update0", O_RDWR, 0);
-  if (fd < 0)
+  sprintf(state.input_path, "%s", (InputPath != NULL) ? InputPath : INPUTPATH);
+
+  printfsocket("Opening %s...\n", state.input_path);
+  state.input_file = open(state.input_path, O_RDONLY, 0);
+  if (state.input_file == -1)
   {
-    printfsocket("Failed to open /dev/pup_update0!\n");
+    printfsocket("Failed to open %s!\n", state.input_path);
     goto end;
   }
 
-  printfsocket("Opening %s...\n", path);
-  input = fopen(path, "rb");
-  if (input == NULL)
-  {
-    printfsocket("Failed to open %s!\n", path);
+  header_data = memalign(0x4000, blsinitial);
+
+  if (header_data == NULL) {
+    printfsocket("Failed to allocate memory!\n");
+  }
+
+  ssize_t bytesread = readbytes(&state, DIO_RESET, blsinitial, header_data, blsinitial);
+
+  if (bytesread < blsinitial) {
+    printfsocket("Failed to read BLS header or BLS header too small!!\n");
     goto end;
   }
 
-  bls_header header;
-  read = fread(&header, sizeof(header), 1, input);
-  if (read != 1)
-  {
-    printfsocket("Failed to read BLS header!\n");
+  bls_header * header = (bls_header*)header_data;
+
+  if (header->magic != 0x32424C53) {
+    printfsocket("Invalid BLS Header!\n");
     goto end;
   }
 
-  entries = (bls_entry*)malloc(sizeof(bls_entry) * header.file_count);
-  read = fread(entries, sizeof(bls_entry), header.file_count, input);
-  if (read != header.file_count)
-  {
-    printfsocket("Failed to read BLS entries!\n");
-    goto end;
+  if ((header->file_count < 1) || (header->file_count > 10)) {
+     printfsocket("Invalid PUP entry count!\n");
+     goto end;
   }
 
-  for (int i = 0; i < header.file_count; i++)
+  state.totalentries = header->file_count;
+
+  for (uint32_t i = 0; i < header->file_count; i++)
   {
-    decrypt_pup(entries[i].name, input, entries[i].block_offset * 512, fd);
+    state.device_fd = open("/dev/pup_update0", O_RDWR, 0);
+    if (state.device_fd < 0)
+    {
+      printfsocket("Failed to open /dev/pup_update0!\n");
+      goto end;
+    }
+
+    printfsocket("Verifying Bls Header...\n");
+    int result = encsrv_verify_blsheader(state.device_fd, header_data, blsinitial, 0);
+
+    if (result != 0) {
+        int errcode = errno;
+        printfsocket("Failed while verifying Bls Header! Error: %d (%s)\n", errcode, strerror(errcode));
+        goto end;
+    }
+
+    sprintf(state.entryname, "%s", header->entry_list[i].name);
+
+    state.pup_type = -1;
+    state.entryid = i + 1;
+
+    state.input_base_offset = header->entry_list[i].block_offset * 512;
+
+    state.output_file = -1;
+    state.output_base_offset = 0;
+
+    sprintf(state.notifystr, "Decrypting \"%s\" (%d/%d) from %s...", state.entryname, state.entryid, state.totalentries, state.input_path);
+    notify(state.notifystr);
+
+    decrypt_pup(&state, OutputPath);
+
+    close(state.device_fd);
+    state.device_fd = -1;
+
   }
 
 end:
-  if (entries != NULL)
+  if (header_data != NULL)
   {
-    free(entries);
+    free(header_data);
   }
 
-  if (input != NULL)
-  {
-    fclose(input);
+  if (strings != NULL) {
+    free(strings);
   }
 
-  if (fd >= 0)
+  if (state.input_file != -1)
   {
-    close(fd);
+    close(state.input_file);
   }
+
+  if (state.device_fd != -1)
+  {
+    close(state.device_fd);
+  }
+
 }
+
+
+
