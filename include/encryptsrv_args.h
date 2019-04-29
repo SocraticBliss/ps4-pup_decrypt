@@ -1,3 +1,6 @@
+#ifndef __ENCRYPTSERVICEARGS_H__
+#define __ENCRYPTSERVICEARGS_H__
+
 typedef struct _verify_blsheader_args
 {
   void* buffer; //rbx (rsi)
@@ -42,3 +45,4 @@ typedef struct _decrypt_segment_block_args
 }
 decrypt_segment_block_args;
 
+#endif

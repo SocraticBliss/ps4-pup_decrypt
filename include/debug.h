@@ -1,5 +1,5 @@
-#ifndef __DEFINES
-#define __DEFINES
+#ifndef __DEBUG_H__
+#define __DEBUG_H__
 
 #ifdef DEBUG_SOCKET
   #define printfsocket(format, ...)\

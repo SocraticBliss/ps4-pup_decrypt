@@ -1,5 +1,5 @@
-#ifndef __ENCRYPTSERVICE__
-#define __ENCRYPTSERVICE__
+#ifndef __ENCRYPTSERVICE_H__
+#define __ENCRYPTSERVICE_H__
 
 int encsrv_verify_blsheader(int fd, void* buffer, size_t length, int type);
 

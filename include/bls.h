@@ -1,3 +1,6 @@
+#ifndef __BLSHEADER_H__
+#define __BLSHEADER_H__
+
 typedef struct _bls_entry
 {
   uint32_t block_offset;
@@ -19,3 +22,4 @@ typedef struct _bls_header
 }
 bls_header;
 
+#endif

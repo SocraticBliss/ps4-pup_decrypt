@@ -54,7 +54,9 @@ ssize_t readbytes(const decrypt_state * state, size_t offset, size_t bytes, void
 
   if ((result == -1) || (bytesread != bytes)) {
       int errcode = errno;
-      printfsocket("Read failed; Read " SSIZET_FMT " of " SSIZET_FMT "bytes - Result: %d (%s)\n", bytesread, bytes, errcode, strerror(errcode));
+      printfsocket("Read failed; Read " SSIZET_FMT " of " SSIZET_FMT "bytes - Result: %d (%s)\n", bytesread, bytes,
+												  errcode,
+												  strerror(errcode));
       return -1;
   }
 
@@ -115,7 +117,9 @@ ssize_t writebytes(const decrypt_state * state, size_t offset, size_t bytes, voi
 
   if ((result == -1) || (byteswritten != bytes)) {
       int errcode = errno;
-      printfsocket("Write failed; Write " SSIZET_FMT " of " SSIZET_FMT "bytes - Result: %d (%s)\n", byteswritten, bytes, errcode, strerror(errcode));
+      printfsocket("Write failed; Write " SSIZET_FMT " of " SSIZET_FMT "bytes - Result: %d (%s)\n", byteswritten,
+												    bytes, errcode,
+												    strerror(errcode));
       return -1;
   }
 
