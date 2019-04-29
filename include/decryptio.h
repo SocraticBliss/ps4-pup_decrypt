@@ -1,3 +1,6 @@
+#ifndef __DECRYPTIO_H__
+#define __DECRYPTIO_H__
+
 #include "ps4.h"
 
 typedef struct _decrypt_state
@@ -27,3 +30,5 @@ decrypt_state;
 
 ssize_t readbytes(const decrypt_state* state, size_t offset, size_t bytes, void* buffer, size_t buffersize);
 ssize_t writebytes(const decrypt_state* state, size_t offset, size_t bytes, void* buffer, size_t buffersize);
+
+#endif
