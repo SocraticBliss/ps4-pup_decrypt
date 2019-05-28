@@ -31,7 +31,13 @@ int kpayload_jailbreak(struct thread *td, struct kpayload_jailbreak_args *args)
 	// Kernel base resolving followed by function resolving
 	uint64_t fw_version = args->kpayload_jailbreak_info->fw_version;
 	switch (fw_version) {
-	case 350: 
+	case 315: 
+		kernel_base   = &((uint8_t *)__readmsr(0xC0000082))[-KERN_315_XFAST_SYSCALL];
+		kernel_ptr    = (uint8_t *)kernel_base;
+		got_prison0   = (void **)&kernel_ptr[KERN_315_PRISON_0];
+		got_rootvnode = (void **)&kernel_ptr[KERN_315_ROOTVNODE];
+		break;
+    case 350: 
 		kernel_base   = &((uint8_t *)__readmsr(0xC0000082))[-KERN_350_XFAST_SYSCALL];
 		kernel_ptr    = (uint8_t *)kernel_base;
 		got_prison0   = (void **)&kernel_ptr[KERN_350_PRISON_0];
