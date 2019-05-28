@@ -1,10 +1,11 @@
+
 #include "debug.h"
 #include "decryptio.h"
 #include "defines.h"
 
 #define chunksize 2097152
 
-ssize_t readbytes(const decrypt_state * state, size_t offset, size_t bytes, void * buffer, size_t buffersize)
+ssize_t readbytes(const decrypt_state *state, size_t offset, size_t bytes, void *buffer, size_t buffersize)
 {
     if (bytes > buffersize) {
         printfsocket("ReadBytes failed! - Error: Buffer is too small!\n");
@@ -42,7 +43,7 @@ ssize_t readbytes(const decrypt_state * state, size_t offset, size_t bytes, void
     size_t bytesremaining = bytes;
 
     while (bytesremaining > 0) {
-        result = read(state->input_file, buffer+bytesread, (bytesremaining >= rchunksize) ? rchunksize : bytesremaining);
+        result = read(state->input_file, buffer + bytesread, (bytesremaining >= rchunksize) ? rchunksize : bytesremaining);
 
         if (result < 1)
             break;
@@ -53,9 +54,7 @@ ssize_t readbytes(const decrypt_state * state, size_t offset, size_t bytes, void
 
     if ((result == -1) || (bytesread != bytes)) {
         int errcode = errno;
-        printfsocket("Read failed; Read " SSIZET_FMT " of " SSIZET_FMT "bytes - Result: %d (%s)\n", bytesread, bytes,
-                                                    errcode,
-                                                    strerror(errcode));
+        printfsocket("Read failed; Read " SSIZET_FMT " of " SSIZET_FMT "bytes - Result: %d (%s)\n", bytesread, bytes, errcode, strerror(errcode));
         return -1;
     }
 
@@ -65,7 +64,7 @@ ssize_t readbytes(const decrypt_state * state, size_t offset, size_t bytes, void
 }
 
 
-ssize_t writebytes(const decrypt_state * state, size_t offset, size_t bytes, void * buffer, size_t buffersize) 
+ssize_t writebytes(const decrypt_state *state, size_t offset, size_t bytes, void *buffer, size_t buffersize) 
 {
     if (bytes > buffersize) {
         printfsocket("WriteBytes failed! - Error: Buffer is too small!\n");
@@ -103,7 +102,7 @@ ssize_t writebytes(const decrypt_state * state, size_t offset, size_t bytes, voi
     size_t bytesremaining = bytes;
 
     while (bytesremaining > 0) {
-        result = write(state->output_file, buffer+byteswritten, (bytesremaining >= wchunksize) ? wchunksize : bytesremaining);
+        result = write(state->output_file, buffer + byteswritten, (bytesremaining >= wchunksize) ? wchunksize : bytesremaining);
 
         if (result < 1)
             break;
@@ -114,9 +113,7 @@ ssize_t writebytes(const decrypt_state * state, size_t offset, size_t bytes, voi
 
     if ((result == -1) || (byteswritten != bytes)) {
         int errcode = errno;
-        printfsocket("Write failed; Write " SSIZET_FMT " of " SSIZET_FMT "bytes - Result: %d (%s)\n", byteswritten,
-                                                        bytes, errcode,
-                                                        strerror(errcode));
+        printfsocket("Write failed; Write " SSIZET_FMT " of " SSIZET_FMT "bytes - Result: %d (%s)\n", byteswritten, bytes, errcode, strerror(errcode));
         return -1;
     }
 

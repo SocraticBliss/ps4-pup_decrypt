@@ -13,7 +13,7 @@
         } while(0)
 #endif
 
-void notify(char* message);
+void notify(char *message);
 uint8_t GetElapsed(uint64_t ResetInterval);
 
 extern int sock;

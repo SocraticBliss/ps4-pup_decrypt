@@ -13,10 +13,10 @@ void notification(char *message)
     sceSysUtilSendSystemNotificationWithText(0x81, buffer);
 }
 
-int verify_segment(const decrypt_state* state, int index, pup_segment* segment, int additional)
+int verify_segment(const decrypt_state *state, int index, pup_segment *segment, int additional)
 {
     int result;
-    uint8_t* buffer = NULL;
+    uint8_t *buffer = NULL;
 
     buffer = memalign(0x4000, segment->compressed_size);
     ssize_t bytesread = readbytes(state, segment->offset, segment->compressed_size, buffer, segment->compressed_size);
@@ -39,12 +39,12 @@ end:
     return result;
 }
 
-int verify_segments(const decrypt_state* state, pup_segment* segments, int segment_count)
+int verify_segments(const decrypt_state *state, pup_segment *segments, int segment_count)
 {
     int result = 0;
 
     for (int i = 0; i < segment_count; i++) {
-        pup_segment* segment = &segments[i];
+        pup_segment *segment = &segments[i];
         if ((segment->flags & 0xF0000000) == 0xE0000000) {
             printfsocket("Verifying segment #%d (%d)... [1]\n", i, segment->flags >> 20);
             result = verify_segment(state, i, segment, 1);
@@ -54,7 +54,7 @@ int verify_segments(const decrypt_state* state, pup_segment* segments, int segme
     }
 
     for (int i = 0; i < segment_count; i++) {
-        pup_segment* segment = &segments[i];
+        pup_segment *segment = &segments[i];
         if ((segment->flags & 0xF0000000) == 0xF0000000) {
             printfsocket("Verifying segment #%d (%d)... [0]\n", i, segment->flags >> 20);
             result = verify_segment(state, i, segment, 0);
@@ -67,11 +67,11 @@ end:
     return result;
 }
 
-int decrypt_segment(const decrypt_state* state, uint16_t index, pup_segment* segment)
+int decrypt_segment(const decrypt_state *state, uint16_t index, pup_segment *segment)
 {
     int result = -1;
 
-    uint8_t* buffer = buffer = memalign(0x4000, segment->compressed_size);
+    uint8_t *buffer = buffer = memalign(0x4000, segment->compressed_size);
 
     int is_compressed = (segment->flags & 8) != 0 ? 1 : 0;
 
@@ -120,12 +120,11 @@ end:
     return result;
 }
 
-int decrypt_segment_blocks(const decrypt_state * state, uint16_t index, pup_segment* segment,
-                            uint16_t table_index, pup_segment* table_segment)
+int decrypt_segment_blocks(const decrypt_state *state, uint16_t index, pup_segment *segment, uint16_t table_index, pup_segment *table_segment)
 {
     int result = -1;
-    uint8_t* table_buffer = NULL;
-    uint8_t* block_buffer = NULL;
+    uint8_t *table_buffer = NULL;
+    uint8_t *block_buffer = NULL;
 
     size_t table_length = table_segment->compressed_size;
     table_buffer = memalign(0x4000, table_length);
@@ -154,13 +153,13 @@ int decrypt_segment_blocks(const decrypt_state * state, uint16_t index, pup_segm
     if (tail_size == 0)
         tail_size = block_size;
 
-    pup_block_info* block_info = NULL;
+    pup_block_info *block_info = NULL;
     if (is_compressed == 1) {
         size_t valid_table_length = block_count * (32 + sizeof(pup_block_info));
         if (valid_table_length != table_length)
             printfsocket("Strange segment #%d table: %llu vs %llu\n", index, valid_table_length, table_length);
         
-        block_info = (pup_block_info*)&table_buffer[32 * block_count];
+        block_info = (pup_block_info *)&table_buffer[32 * block_count];
     }
 
     block_buffer = memalign(0x4000, block_size);
@@ -185,7 +184,7 @@ int decrypt_segment_blocks(const decrypt_state * state, uint16_t index, pup_segm
         ssize_t block_offset = 0;
 
         if (is_compressed == 1) {
-            pup_block_info* tblock_info = &block_info[i];
+            pup_block_info *tblock_info = &block_info[i];
             uint32_t unpadded_size = (tblock_info->size & ~0xFu) - (tblock_info->size & 0xFu);
 
             read_size = block_size;
@@ -244,7 +243,7 @@ end:
     return result;
 }
 
-int find_table_segment(int index, pup_segment* segments, int segment_count, int* table_index)
+int find_table_segment(int index, pup_segment *segments, int segment_count, int *table_index)
 {
     if (((index | 0x100) & 0xF00) == 0xF00) {
         printfsocket("Can't do table for segment #%d\n", index);
@@ -265,11 +264,11 @@ int find_table_segment(int index, pup_segment* segments, int segment_count, int*
     return -2;
 }
 
-int decrypt_pup_data(const decrypt_state * state)
+int decrypt_pup_data(const decrypt_state *state)
 {
     int result;
     ssize_t bytesread;
-    uint8_t* header_data = NULL;
+    uint8_t *header_data = NULL;
 
     pup_file_header file_header;
     bytesread = readbytes(state, DIO_BASEOFFSET, sizeof(file_header), &file_header, sizeof(file_header));
@@ -308,8 +307,8 @@ int decrypt_pup_data(const decrypt_state * state)
         goto end;
     }
 
-    pup_header* header = (pup_header*)&header_data[0];
-    pup_segment* segments = (pup_segment*)&header_data[0x20];
+    pup_header *header = (pup_header *)&header_data[0];
+    pup_segment *segments = (pup_segment *)&header_data[0x20];
 
     ssize_t byteswritten = writebytes(state, DIO_BASEOFFSET, header_size, header_data, header_size);
     if (byteswritten != header_size) {
@@ -324,19 +323,16 @@ int decrypt_pup_data(const decrypt_state * state)
         goto end;
     }
 
-    /*for (int i = 0; i < header->segment_count; i++) {
-        pup_segment* segment = &segments[i];
-        printfsocket("%4d i=%4u b=%u c=%u t=%u r=%05X\n",
-                    i, segment->flags >> 20,
-                    (segment->flags & 0x800) != 0,
-                    (segment->flags & 0x8) != 0,
-                    (segment->flags & 0x1) != 0,
-                    segment->flags & 0xFF7F6);
-    }*/
+    /*
+    for (int i = 0; i < header->segment_count; i++) {
+        pup_segment *segment = &segments[i];
+        printfsocket("%4d i=%4u b=%u c=%u t=%u r=%05X\n", i, segment->flags >> 20, (segment->flags & 0x800) != 0, (segment->flags & 0x8) != 0, (segment->flags & 0x1) != 0, segment->flags & 0xFF7F6);
+    }
+    */
 
     printfsocket("Decrypting %d segments...\n", header->segment_count);
     for (int i = 0; i < header->segment_count; i++) {
-        pup_segment* segment = &segments[i];
+        pup_segment *segment = &segments[i];
 
         uint32_t special = segment->flags & 0xF0000000;
         if (special == 0xE0000000) {
@@ -351,9 +347,9 @@ int decrypt_pup_data(const decrypt_state * state)
 
         if ((segment->flags & 0x800) != 0) {
             int table_index;
+
             result = find_table_segment(i, segments, header->segment_count, &table_index);
-            if (result < 0)
-            {
+            if (result < 0) {
                 printfsocket("Failed to find table for segment #%d!\n", i);
                 continue;
             }
@@ -374,7 +370,7 @@ end:
     return 0;
 }
 
-void decrypt_pup(decrypt_state * state, const char * OutputPath)
+void decrypt_pup(decrypt_state *state, const char *OutputPath)
 {
 
     if (OutputPath != NULL) {
@@ -391,7 +387,7 @@ void decrypt_pup(decrypt_state * state, const char * OutputPath)
         goto end;
     }
 
-    const char * name = state->entryname;
+    const char *name = state->entryname;
 
     if (strcmp(name, "PS4UPDATE1.PUP") == 0 || strcmp(name, "PS4UPDATE2.PUP") == 0)
         state->pup_type = 1;
@@ -412,18 +408,18 @@ end:
 }
 
 
-void decrypt_pups(const char * InputPath, const char * OutputPath)
+void decrypt_pups(const char *InputPath, const char *OutputPath)
 {
     decrypt_state state = { 0 };
     state.device_fd = -1;
 
-    char * strings = (char*)malloc(2048);
+    char *strings = (char *)malloc(2048);
     state.input_path = strings;             // 512
-    state.output_path = strings+512;        // 512
-    state.entryname = strings+1024;         // 512
-    state.notifystr = strings+1536;         // 512
+    state.output_path = strings + 512;      // 512
+    state.entryname = strings + 1024;       // 512
+    state.notifystr = strings + 1536;       // 512
 
-    uint8_t * header_data = NULL;
+    uint8_t *header_data = NULL;
     size_t blsinitial = 0x400;
 
     sprintf(state.input_path, "%s", (InputPath != NULL) ? InputPath : INPUTPATH);
@@ -436,20 +432,17 @@ void decrypt_pups(const char * InputPath, const char * OutputPath)
     }
 
     header_data = memalign(0x4000, blsinitial);
-
     if (header_data == NULL) {
         printfsocket("Failed to allocate memory!\n");
     }
 
     ssize_t bytesread = readbytes(&state, DIO_RESET, blsinitial, header_data, blsinitial);
-
     if (bytesread < blsinitial) {
         printfsocket("Failed to read BLS header or BLS header too small!!\n");
         goto end;
     }
 
-    bls_header * header = (bls_header*)header_data;
-
+    bls_header *header = (bls_header *)header_data;
     if (header->magic != 0x32424C53) {
         printfsocket("Invalid BLS header!\n");
         goto end;
@@ -461,7 +454,6 @@ void decrypt_pups(const char * InputPath, const char * OutputPath)
     }
 
     state.totalentries = header->file_count;
-
     for (uint32_t i = 0; i < header->file_count; i++) {
         state.device_fd = open("/dev/pup_update0", O_RDWR, 0);
         if (state.device_fd < 0) {
